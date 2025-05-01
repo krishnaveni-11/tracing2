@@ -1,15 +1,15 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import threading
 import http.client  # Built-in alternative to requests
 
 class ServerAHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # 1. Print thread ID (will be same for all requests)
+        # 1. Print thread ID (will be different for concurrent requests)
         thread_id = threading.get_ident()
         print(f"\nServer A handling request in thread: {thread_id}")
         
         # 2. Call Server B
-        conn = http.client.HTTPConnection("localhost:8082")
+        conn = http.client.HTTPConnection("localhost", 8082)
         try:
             conn.request("GET", "/")
             response = conn.getresponse()
@@ -32,6 +32,6 @@ class ServerAHandler(BaseHTTPRequestHandler):
         self.wfile.write(message.encode())
 
 if __name__ == "__main__":
-    server_a = HTTPServer(('', 8081), ServerAHandler)
-    print("Server A running on port 8081 (single-threaded)...")
+    server_a = ThreadingHTTPServer(('', 8081), ServerAHandler)
+    print("Server A running on port 8081 (multithreaded)...")
     server_a.serve_forever()
