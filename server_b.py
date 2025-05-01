@@ -1,4 +1,4 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 class ServerBHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -8,6 +8,6 @@ class ServerBHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Response from Server B!\n")
 
 if __name__ == "__main__":
-    server_b = HTTPServer(('', 8082), ServerBHandler)
-    print("Server B running on port 8082 (single-threaded)...")
+    server_b = ThreadingHTTPServer(('', 8082), ServerBHandler)
+    print("Server B running on port 8082 (multithreaded)...")
     server_b.serve_forever()
