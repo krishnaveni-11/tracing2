@@ -3,6 +3,8 @@ https://github.com/DataDog/ebpf-training/blob/main/workshop3/README.md
 https://www.datadoghq.com/blog/ebpf-guide/
 https://github.com/DataDog/ebpf-training/blob/main/workshop1/capture-traffic/sourcecode.c
 https://www.perplexity.ai/search/i-wanted-to-get-source-and-des-F_V1UfWgQTezQXUS1VWZpQ
+
+
 seq 10 | xargs -n1 -P10 -I{} curl -s -o /dev/null -w "%{http_code}\n" http://192.168.122.127:8081
 
 
@@ -30,5 +32,6 @@ ps aux | grep helper_server.py
 sudo tcpdump -i enp1s0 host 192.168.122.127 and port 8081
 
 chmod +x http_trace.py
- sudo ./http_trace.py
+sudo ./http_trace.py
+sudo strace -p 3718
 
