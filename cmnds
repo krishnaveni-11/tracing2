@@ -1,0 +1,34 @@
+https://blog.px.dev/ebpf-probes-and-you/
+https://github.com/DataDog/ebpf-training/blob/main/workshop3/README.md
+https://www.datadoghq.com/blog/ebpf-guide/
+https://github.com/DataDog/ebpf-training/blob/main/workshop1/capture-traffic/sourcecode.c
+https://www.perplexity.ai/search/i-wanted-to-get-source-and-des-F_V1UfWgQTezQXUS1VWZpQ
+seq 10 | xargs -n1 -P10 -I{} curl -s -o /dev/null -w "%{http_code}\n" http://192.168.122.127:8081
+
+
+In host ubuntu
+sudo brctl addbr bridge1
+sudo ip addr add 172.17.0.1/24 dev bridge1
+sudo ip link set up bridge1
+
+In server1 VM
+server1@server1:~$ sudo ip addr add 172.17.0.2/24 dev enp1s0
+
+
+
+sudo python3 helper_server.py 
+curl http://localhost:8081
+sudo python3 tracer.py 
+
+
+
+useful commands:
+pip3 install bcc
+sudo cat /sys/kernel/debug/tracing/available_filter_functions | grep accept
+ps aux | grep helper_server.py
+
+sudo tcpdump -i enp1s0 host 192.168.122.127 and port 8081
+
+chmod +x http_trace.py
+ sudo ./http_trace.py
+
