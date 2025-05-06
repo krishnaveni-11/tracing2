@@ -1,37 +1,50 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import threading
-import http.client  # Built-in alternative to requests
+import http.client
 
 class ServerAHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"  # Use HTTP/1.1
+
     def do_GET(self):
-        # 1. Print thread ID (will be same for all requests)
         thread_id = threading.get_ident()
         print(f"\nServer A handling request in thread: {thread_id}")
-        
-        # 2. Call Server B
-        conn = http.client.HTTPConnection("localhost:8082")
-        try:
-            conn.request("GET", "/")
-            response = conn.getresponse()
-            server_b_response = response.read().decode()
-            print("Received from Server B:", server_b_response.strip())
-        except Exception as e:
-            server_b_response = f"Error: {str(e)}"
-            print("Failed to contact Server B:", server_b_response)
-        finally:
-            conn.close()
 
-        # 3. Respond to client
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
+        response_event = threading.Event()
+        server_b_response = {}
+
+        def call_server_b():
+            conn = http.client.HTTPConnection("localhost", 8082, timeout=5)
+            try:
+                conn.request("GET", "/")
+                resp = conn.getresponse()
+                server_b_response['data'] = resp.read().decode()
+            except Exception as e:
+                server_b_response['data'] = f"Error: {e}"
+            finally:
+                conn.close()
+                response_event.set()
+
+        # Start background thread to call Server B
+        threading.Thread(target=call_server_b).start()
+
+        # Wait for Server B to respond
+        response_event.wait(timeout=5)  # Wait max 5 seconds
+
+        # Construct response message
         message = (
             f"Server A (Thread {thread_id}) processed this request\n"
-            f"Server B says: {server_b_response}"
-        )
-        self.wfile.write(message.encode())
+            f"Server B says: {server_b_response.get('data', 'No response')}"
+        ).encode()
+
+        # Send HTTP response
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.send_header("Content-Length", str(len(message)))  # Required in HTTP/1.1
+        self.end_headers()
+
+        self.wfile.write(message)
 
 if __name__ == "__main__":
-    server_a = HTTPServer(('', 8081), ServerAHandler)
-    print("Server A running on port 8081 (single-threaded)...")
+    server_a = ThreadingHTTPServer(('', 8081), ServerAHandler)
+    print("Server A running on port 8081 (HTTP/1.1, multithreaded)...")
     server_a.serve_forever()
