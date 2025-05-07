@@ -4,7 +4,7 @@ https://www.datadoghq.com/blog/ebpf-guide/
 https://github.com/DataDog/ebpf-training/blob/main/workshop1/capture-traffic/sourcecode.c
 https://www.perplexity.ai/search/i-wanted-to-get-source-and-des-F_V1UfWgQTezQXUS1VWZpQ
 https://www.youtube.com/watch?v=yM2BiSo45M0 (link for distributed tracing )
-
+https://pages.cs.wisc.edu/~remzi/OSTEP/  (notes on concurrency and event driven )
 
 seq 10 | xargs -n1 -P10 -I{} curl -s -o /dev/null -w "%{http_code}\n" http://192.168.122.127:8081
 
