@@ -1,16 +1,24 @@
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from aiohttp import web
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import time
 
-class ServerBHandler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"  # <-- Set protocol version to HTTP/1.1
+executor = ThreadPoolExecutor()
 
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.send_header("Content-Length", str(len("Response from Server B!\n")))  # Needed for HTTP/1.1
-        self.end_headers()
-        self.wfile.write(b"Response from Server B!\n")
+# Simulate a blocking task that runs in a separate thread
+def blocking_response():
+    # Simulate processing delay
+    time.sleep(0.1)
+    return "Response from Server B!\n"
+
+async def handle(request):
+    loop = asyncio.get_running_loop()
+    response_text = await loop.run_in_executor(executor, blocking_response)
+    return web.Response(text=response_text, content_type='text/plain')
+
+app = web.Application()
+app.router.add_get('/', handle)
 
 if __name__ == "__main__":
-    server_b = ThreadingHTTPServer(('', 8082), ServerBHandler)
-    print("Server B running on port 8082 (HTTP/1.1, multithreaded)...")
-    server_b.serve_forever()
+    print("Server B running on port 8082 (event-driven + multithreaded)...")
+    web.run_app(app, port=8082)
