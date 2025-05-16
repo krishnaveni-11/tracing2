@@ -7,7 +7,7 @@ import struct
 def int_to_ip(ip):
     return socket.inet_ntoa(struct.pack("!I", ip)) if ip else "0.0.0.0"
 
-TARGET_PID = 5147
+TARGET_PID = 6149
 start_ts = time.time()
 start_ktime = None
 
@@ -32,7 +32,21 @@ struct data_t {{
     u32 local_ip;
 }};
 
+struct inet_accept_t {{
+    u64 pid;
+    u64 tid;
+    u64 ts;
+    int fd;
+    char comm[TASK_COMM_LEN];
+    u16 lport;
+    u16 dport;
+    u32 laddr;
+    u32 daddr;
+    u16 family;
+}};
+
 BPF_PERF_OUTPUT(events);
+BPF_PERF_OUTPUT(inet_accept_events);
 BPF_HASH(active_close_fds, u64, int);
 BPF_HASH(addr_map, u64, struct sockaddr **);
 
@@ -65,29 +79,55 @@ int trace_accept_exit(struct pt_regs *ctx) {{
     struct socket *sock = (struct socket *)PT_REGS_PARM1(ctx);
     struct sock *sk = NULL;
     bpf_probe_read_user(&sk, sizeof(sk), &sock->sk);
-    
+
     if (sk) {{
         // Local address
-        bpf_probe_read_kernel(&data.local_port, sizeof(data.local_port), 
-                            &sk->__sk_common.skc_num);
+        bpf_probe_read_kernel(&data.local_port, sizeof(data.local_port), &sk->__sk_common.skc_num);
         data.local_port = ntohs(data.local_port);
-        
-        bpf_probe_read_kernel(&data.local_ip, sizeof(data.local_ip), 
-                            &sk->__sk_common.skc_rcv_saddr);
+
+        bpf_probe_read_kernel(&data.local_ip, sizeof(data.local_ip), &sk->__sk_common.skc_rcv_saddr);
 
         // Remote address
-        bpf_probe_read_kernel(&data.port, sizeof(data.port), 
-                            &sk->__sk_common.skc_dport);
+        bpf_probe_read_kernel(&data.port, sizeof(data.port), &sk->__sk_common.skc_dport);
         data.port = ntohs(data.port);
-        
-        bpf_probe_read_kernel(&data.ip, sizeof(data.ip), 
-                            &sk->__sk_common.skc_daddr);
+
+        bpf_probe_read_kernel(&data.ip, sizeof(data.ip), &sk->__sk_common.skc_daddr);
     }}
 
     events.perf_submit(ctx, &data, sizeof(data));
     return 0;
 }}
 
+
+// KERNEL-LEVEL ACCEPT (inet_csk_accept)
+int trace_inet_csk_accept_return(struct pt_regs *ctx) {{
+    u64 ts = bpf_ktime_get_ns();
+    u64 pid_tgid = bpf_get_current_pid_tgid();
+    u32 pid = pid_tgid >> 32;
+    u32 tid = pid_tgid & 0xFFFFFFFF;
+    if (pid != {TARGET_PID}) return 0;
+
+    struct sock *sk = (struct sock *)PT_REGS_RC(ctx);
+    if (!sk) return 0;
+
+    struct inet_accept_t data = {{0}};
+    data.pid = pid;
+    data.tid = tid;
+    data.ts = ts;
+    bpf_get_current_comm(&data.comm, sizeof(data.comm));
+    bpf_probe_read_kernel(&data.family, sizeof(data.family), &sk->__sk_common.skc_family);
+
+    if (data.family == AF_INET) {{
+        bpf_probe_read_kernel(&data.lport, sizeof(data.lport), &sk->__sk_common.skc_num);
+        u16 dport_net;
+        bpf_probe_read_kernel(&dport_net, sizeof(dport_net), &sk->__sk_common.skc_dport);
+        data.dport = ntohs(dport_net);
+        bpf_probe_read_kernel(&data.laddr, sizeof(data.laddr), &sk->__sk_common.skc_rcv_saddr);
+        bpf_probe_read_kernel(&data.daddr, sizeof(data.daddr), &sk->__sk_common.skc_daddr);
+        inet_accept_events.perf_submit(ctx, &data, sizeof(data));
+    }}
+    return 0;
+}}
 
 // READ ENTRY/EXIT
 int trace_read_entry(struct pt_regs *ctx) {{
@@ -164,7 +204,6 @@ int trace_write_exit(struct pt_regs *ctx) {{
 // CLOSE ENTRY/EXIT
 int trace_close_entry(struct pt_regs *ctx) {{
     u64 id = bpf_get_current_pid_tgid();
-     
     u32 pid = id >> 32;
     u32 tid = id & 0xFFFFFFFF;
     if (pid != {TARGET_PID}) return 0;
@@ -186,8 +225,7 @@ int trace_close_entry(struct pt_regs *ctx) {{
 }}
 
 int trace_close_exit(struct pt_regs *ctx) {{
-     u64 id = bpf_get_current_pid_tgid();
-    
+    u64 id = bpf_get_current_pid_tgid();
     u32 pid = id >> 32;
     u32 tid = id & 0xFFFFFFFF;
     if (pid != {TARGET_PID}) return 0;
@@ -225,6 +263,9 @@ b.attach_kretprobe(event="__x64_sys_accept", fn_name="trace_accept_exit")
 b.attach_kprobe(event="__x64_sys_accept4", fn_name="trace_accept_entry")
 b.attach_kretprobe(event="__x64_sys_accept4", fn_name="trace_accept_exit")
 
+# Attach kernel-level accept
+b.attach_kretprobe(event="inet_csk_accept", fn_name="trace_inet_csk_accept_return")
+
 # Read syscalls
 read_calls = ["read", "pread64", "recv", "recvfrom", "recvmsg", "readv"]
 for call in read_calls:
@@ -232,7 +273,7 @@ for call in read_calls:
     b.attach_kretprobe(event=b.get_syscall_fnname(call), fn_name="trace_read_exit")
 
 # Write syscalls
-write_calls = ["send", "sendto", "sendmsg"]
+write_calls = ["write", "pwrite64", "send", "sendto", "sendmsg", "writev"]
 for call in write_calls:
     b.attach_kprobe(event=b.get_syscall_fnname(call), fn_name="trace_write_entry")
     b.attach_kretprobe(event=b.get_syscall_fnname(call), fn_name="trace_write_exit")
@@ -240,7 +281,6 @@ for call in write_calls:
 # Close syscalls
 b.attach_kprobe(event="__x64_sys_close", fn_name="trace_close_entry")
 b.attach_kretprobe(event="__x64_sys_close", fn_name="trace_close_exit")
-
 
 class Data(ctypes.Structure):
     _fields_ = [
@@ -258,51 +298,72 @@ class Data(ctypes.Structure):
         ("local_ip", ctypes.c_uint),
     ]
 
+class InetAccept(ctypes.Structure):
+    _fields_ = [
+        ("pid", ctypes.c_ulonglong),
+        ("tid", ctypes.c_ulonglong),
+        ("ts", ctypes.c_ulonglong),
+        ("fd", ctypes.c_int),
+        ("comm", ctypes.c_char * 16),
+        ("lport", ctypes.c_ushort),
+        ("dport", ctypes.c_ushort),
+        ("laddr", ctypes.c_uint),
+        ("daddr", ctypes.c_uint),
+        ("family", ctypes.c_ushort),
+    ]
+
 def print_event(cpu, data, size):
     event = ctypes.cast(data, ctypes.POINTER(Data)).contents
     label = event.event_type.decode().strip()
-    
-    # Calculate relative timestamp
+    global start_ktime
     if start_ktime is None:
+        start_ktime = event.ts
         rel_ts = 0
     else:
-        rel_ts = (event.ts - start_ktime) / 1000000000  # Convert ns to seconds
-    
-    # Format timestamp
+        rel_ts = (event.ts - start_ktime) / 1000000000  # ns to s
+
     timestamp = f"{time.strftime('%H:%M:%S', time.localtime())}+{rel_ts:.6f}"
-    
-    # Base message components
+
     components = [
-        f"[{timestamp}]",  # Add timestamp at the beginning
+        f"[{timestamp}]",
         f"[{label}] PID {event.pid}",
         f"TID {event.tid}",
         f"UID {event.uid}",
         f"COMM {event.comm.decode().strip()}",
         f"FD {event.fd if event.fd >= 0 else 'INVALID'}"
     ]
-
-    # Handle return values for EXIT events
     if label.endswith("_EX"):
         if "CLOSE_EX" in label:
             components.append(f"RETURNED {'SUCCESS' if event.bytes == 0 else f'ERROR (code={event.bytes})'}")
-        else:  # READ_EX/WRITE_EX
+        else:
             components.append(f"RETURNED {event.bytes} bytes")
-    
-    # Handle ACCEPT events
     if "ACCEPT" in label:
         components.append(
             f"Remote {int_to_ip(event.ip)}:{event.port} "
             f"Local {int_to_ip(event.local_ip)}:{event.local_port}"
         )
-
     print(" ".join(components))
 
+def print_inet_accept_event(cpu, data, size):
+    event = ctypes.cast(data, ctypes.POINTER(InetAccept)).contents
+    global start_ktime
+    if start_ktime is None:
+        start_ktime = event.ts
+        rel_ts = 0
+    else:
+        rel_ts = (event.ts - start_ktime) / 1000000000  # ns to s
+    timestamp = f"{time.strftime('%H:%M:%S', time.localtime())}+{rel_ts:.6f}"
+
+    if event.family == 2:  # AF_INET
+        print(f"[{timestamp}] [INET_ACCEPT] PID {event.pid} TID {event.tid} COMM {event.comm.decode().strip()} "
+              f"LADDR {int_to_ip(event.laddr)}:{event.lport} "
+              f"RADDR {int_to_ip(event.daddr)}:{event.dport}")
 
 print(f"Tracing PID {TARGET_PID}... Ctrl-C to exit")
 b["events"].open_perf_buffer(print_event)
+b["inet_accept_events"].open_perf_buffer(print_inet_accept_event)
 while True:
     try:
         b.perf_buffer_poll()
     except KeyboardInterrupt:
         exit()
-
