@@ -8,6 +8,7 @@ https://pages.cs.wisc.edu/~remzi/OSTEP/  (notes on concurrency and event driven 
 https://concurrencydeepdives.com/blocking-sockets/
 seq 10 | xargs -n1 -P10 -I{} curl -s -o /dev/null -w "%{http_code}\n" http://192.168.122.127:8081
 
+curl -v http://192.168.122.127:8081 --next http://192.168.122.127:8081
 
 In host ubuntu
 sudo brctl addbr bridge1
