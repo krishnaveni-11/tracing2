@@ -36,4 +36,5 @@ sudo tcpdump -i enp1s0 host 192.168.122.127 and port 8081
 chmod +x http_trace.py
 sudo ./http_trace.py
 sudo strace -f -p 3718
+sudo python3 tcp_threadd_tracker.py 6149
 
