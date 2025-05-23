@@ -4,7 +4,7 @@ from struct import pack
 import ctypes as ct
 import requests
 
-TARGET_PID = 4030  # replace with your actual PID
+TARGET_PID = 6001  # replace with your actual PID
 
 bpf_text = """
 #include <net/sock.h>
@@ -123,7 +123,7 @@ def send_log(payload):
     body = json.dumps(payload)
 
     try:
-        conn.request("POST", "/log", body, headers)
+        conn.request("POST", "/log/clone", body, headers)
         response = conn.getresponse()
         if response.status != 200:
             print(f"[WARN] Log not accepted: {response.status} {response.reason}")
