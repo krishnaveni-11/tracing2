@@ -7,7 +7,7 @@ import struct
 def int_to_ip(ip):
     return socket.inet_ntoa(struct.pack("!I", ip)) if ip else "0.0.0.0"
 
-TARGET_PID = 4216
+TARGET_PID = 6001
 start_ts = time.time()
 start_ktime = None
 
@@ -312,6 +312,28 @@ class InetAccept(ctypes.Structure):
         ("family", ctypes.c_ushort),
     ]
 
+
+def int_to_ip(addr):
+    return socket.inet_ntoa(struct.pack("I", addr))
+
+def send_log(payload):
+    import http.client
+    import json
+
+    conn = http.client.HTTPConnection("localhost", 5000)
+    headers = {"Content-type": "application/json"}
+    body = json.dumps(payload)
+
+    try:
+        conn.request("POST", "/log/event", body, headers)
+        response = conn.getresponse()
+        if response.status != 200:
+            print(f"[WARN] Log not accepted: {response.status} {response.reason}")
+    except Exception as e:
+        print(f"[ERROR] Failed to send log: {e}")
+    finally:
+        conn.close()
+
 def print_event(cpu, data, size):
     event = ctypes.cast(data, ctypes.POINTER(Data)).contents
     label = event.event_type.decode().strip()
@@ -344,6 +366,25 @@ def print_event(cpu, data, size):
         )
     print(" ".join(components))
 
+    # Send log to central collector
+    payload = {
+        "type": "event",
+        "timestamp": timestamp,
+        "label": label,
+        "pid": event.pid,
+        "tid": event.tid,
+        "uid": event.uid,
+        "comm": event.comm.decode().strip(),
+        "fd": event.fd,
+        "bytes": event.bytes,
+        "remote_ip": int_to_ip(event.ip),
+        "remote_port": event.port,
+        "local_ip": int_to_ip(event.local_ip),
+        "local_port": event.local_port
+    }
+    send_log(payload)
+
+
 def print_inet_accept_event(cpu, data, size):
     event = ctypes.cast(data, ctypes.POINTER(InetAccept)).contents
     global start_ktime
@@ -352,12 +393,29 @@ def print_inet_accept_event(cpu, data, size):
         rel_ts = 0
     else:
         rel_ts = (event.ts - start_ktime) / 1000000000  # ns to s
+
     timestamp = f"{time.strftime('%H:%M:%S', time.localtime())}+{rel_ts:.6f}"
 
     if event.family == 2:  # AF_INET
         print(f"[{timestamp}] [INET_ACCEPT] PID {event.pid} TID {event.tid} COMM {event.comm.decode().strip()} "
               f"LADDR {int_to_ip(event.laddr)}:{event.lport} "
               f"RADDR {int_to_ip(event.daddr)}:{event.dport}")
+
+        # Send log to central collector
+        payload = {
+            "type": "inet_accept",
+            "timestamp": timestamp,
+            "pid": event.pid,
+            "tid": event.tid,
+            "comm": event.comm.decode().strip(),
+            "laddr": int_to_ip(event.laddr),
+            "lport": event.lport,
+            "daddr": int_to_ip(event.daddr),
+            "dport": event.dport,
+            "family": event.family
+        }
+        send_log(payload)
+
 
 print(f"Tracing PID {TARGET_PID}... Ctrl-C to exit")
 b["events"].open_perf_buffer(print_event)
