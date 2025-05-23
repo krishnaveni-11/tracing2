@@ -80,19 +80,39 @@ b.attach_kprobe(event="__tcp_transmit_skb", fn_name="trace_tcp_transmit_skb")
 b["target_pid_map"][ct.c_uint(0)] = ct.c_uint(target_pid)
 print("%-18s %-16s %-6s %-6s %-5s %-8s %-8s %-8s" % 
       ("TIME(s)", "COMM", "PID", "TID", "USER", "SRC", "DEST", "SEQ"))
+      
+def send_log(payload):
+    import http.client
+    import json
 
+    conn = http.client.HTTPConnection("localhost", 5000)
+    headers = {"Content-type": "application/json"}
+    body = json.dumps(payload)
+
+    try:
+        conn.request("POST", "/log/seq", body, headers)
+        response = conn.getresponse()
+        if response.status != 200:
+            print(f"[WARN] Log not accepted: {response.status} {response.reason}")
+    except Exception as e:
+        print(f"[ERROR] Failed to send log: {e}")
+    finally:
+        conn.close()
 def print_event(cpu, data, size):
     event = b["events"].event(data)
-    print("%-18.9f %-16s %-6d %-6d %-5s %-8d %-8d %-8d" % (
-        time.time(),
-        event.comm.decode('utf-8', 'replace'),  # Safely decode process name
+    timestamp = time.time()
+    log_line = "%-18.9f %-16s %-6d %-6d %-5s %-8d %-8d %-8d" % (
+        timestamp,
+        event.comm.decode('utf-8', 'replace'),
         event.pid,
         event.tid,
         "Y" if event.is_user else "N",
         event.src,
         event.dest,
         event.seq
-    ))
+    )
+    print(log_line)
+    send_log(log_line)
 
 b["events"].open_perf_buffer(print_event)
 while True:
